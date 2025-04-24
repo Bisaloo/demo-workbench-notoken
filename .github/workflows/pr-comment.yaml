@@ -55,12 +55,6 @@ jobs:
           echo "NUM=$(<./NR)"
           echo "NUM=$(<./NR)" >> $GITHUB_OUTPUT
 
-      - name: "Fail if PR number was not present"
-        id: bad-pr
-        if: ${{ steps.dl.outputs.success == 'false' }} && ${{ steps.dl-manual.outputs.success == 'false' }}
-        run: |
-          echo '::error::A pull request number was not recorded. The pull request that triggered this workflow is likely malicious.'
-          exit 1
       - name: "Get Invalid Hashes File"
         id: hash
         run: |
@@ -69,7 +63,7 @@ jobs:
           EOF" >> $GITHUB_OUTPUT
       - name: "Check PR"
         id: check-pr
-        if: ${{ steps.dl.outputs.success == 'true' }}
+        if: ${{ steps.dl.outputs.success == 'true' }} || ${{ steps.dl-manual.outputs.success == 'true' }}
         uses: carpentries/actions/check-valid-pr@main
         with:
           pr: ${{ steps.get-pr.outputs.NUM }}
