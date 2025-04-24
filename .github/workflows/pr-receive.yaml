@@ -1,6 +1,11 @@
 name: "Receive Pull Request"
 
 on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        type: number
+        required: true
   pull_request:
     types:
       [opened, synchronize, reopened]
@@ -17,11 +22,16 @@ jobs:
     outputs:
       is_valid: ${{ steps.check-pr.outputs.VALID }}
     steps:
-      - name: "Record PR number"
-        id: record
-        if: ${{ always() }}
+      - name: "Record PR number (for PR automatic trigger)"
+        if: ${{ github.event_name == 'pull_request' }}
         run: |
           echo ${{ github.event.number }} > ${{ github.workspace }}/NR # 2022-03-02: artifact name fixed to be NR
+          echo "NR=${{ github.event.number }}" >> $GITHUB_ENV
+      - name: "Pass PR number (for manual trigger)"
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          echo ${{ inputs.pr_number }} > ${{ github.workspace }}/NR
+          echo "NR=${{ inputs.pr_number }}" >> $GITHUB_ENV
       - name: "Upload PR number"
         id: upload
         if: ${{ always() }}
@@ -42,13 +52,15 @@ jobs:
         id: check-pr
         uses: carpentries/actions/check-valid-pr@main
         with:
-          pr: ${{ github.event.number }}
+          pr: ${{ env.NR }}
           invalid: ${{ fromJSON(steps.hash.outputs.json)[github.repository] }}
 
   build-md-source:
     name: "Build markdown source files if valid"
     needs: test-pr
     runs-on: ubuntu-22.04
+    permissions:
+      actions: write
     if: ${{ needs.test-pr.outputs.is_valid == 'true' }}
     env:
       GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
@@ -57,8 +69,32 @@ jobs:
       PR: ${{ github.workspace }}/site/pr
       MD: ${{ github.workspace }}/site/built
     steps:
+      - name: "Record PR number (for PR automatic trigger)"
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          echo "NR=${{ github.event.number }}" >> $GITHUB_ENV
+
+      - name: "Pass PR number (for manual trigger)"
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          echo "NR=${{ inputs.pr_number }}" >> $GITHUB_ENV
+
+      - name: "Get branch if manual trigger"
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "PR_BRANCH=$(gh -R ${{ github.repository }} pr view ${{ env.NR }} --json headRefName --jq '.headRefName')" >> $GITHUB_ENV
+
       - name: "Check Out Main Branch"
+        if: ${{ github.event_name == 'pull_request' }}
         uses: actions/checkout@v4
+
+      - name: "Checkout Out Main Branch"
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.PR_BRANCH }}
 
       - name: "Check Out Staging Branch"
         uses: actions/checkout@v4
@@ -94,11 +130,25 @@ jobs:
         shell: Rscript {0}
 
       - name: "Generate Artifacts"
+        if: ${{ github.event_name == 'pull_request' }}
         id: generate-artifacts
         run: |
           sandpaper:::ci_bundle_pr_artifacts(
             repo         = '${{ github.repository }}',
             pr_number    = '${{ github.event.number }}',
+            path_md      = '${{ env.MD }}',
+            path_pr      = '${{ env.PR }}',
+            path_archive = '${{ env.CHIVE }}',
+            branch       = 'md-outputs'
+          )
+        shell: Rscript {0}
+
+      - name: "Generate Artifacts"
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          sandpaper:::ci_bundle_pr_artifacts(
+            repo         = '${{ github.repository }}',
+            pr_number    = '${{ inputs.pr_number }}',
             path_md      = '${{ env.MD }}',
             path_pr      = '${{ env.PR }}',
             path_archive = '${{ env.CHIVE }}',
@@ -130,3 +180,9 @@ jobs:
       - name: "Teardown"
         run: sandpaper::reset_site()
         shell: Rscript {0}
+
+      - name: Trigger follow up workflow manually if necessary
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run pr-comment.yaml --field workflow_id=${{ github.run_id }}
