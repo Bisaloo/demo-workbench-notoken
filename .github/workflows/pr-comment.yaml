@@ -57,7 +57,7 @@ jobs:
 
       - name: "Fail if PR number was not present"
         id: bad-pr
-        if: ${{ steps.dl.outputs.success != 'true' }} && ${{ steps.dl-manual.outputs.success != 'true' }}
+        if: ${{ steps.dl.outputs.success == 'false' }} && ${{ steps.dl-manual.outputs.success == 'false' }}
         run: |
           echo '::error::A pull request number was not recorded. The pull request that triggered this workflow is likely malicious.'
           exit 1
